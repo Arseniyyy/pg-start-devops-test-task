@@ -1,33 +1,36 @@
 #!/bin/bash
 
 PGPASSWORD=9879
+export PGPASSWORD=$PGPASSWORD
 
 echo
 echo "Обновление и установка пакетов"
-dnf --refresh -y update
-dnf install -y yum-utils firewalld
-yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+apt-get -y remove firewalld
+apt-get -y update
+apt-get -y install ca-certificates curl firewalld
 
 echo
 echo "Установка Docker"
-dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-systemctl start docker
-systemctl enable docker
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get -y update
+apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+apt-get -y install postgresql
 
 echo
-echo "Проверка работы Docker"
+echo "Проверка запущен ли Docker"
 systemctl status docker
+
+echo
+echo "Подтягиваем образ postgres"
 docker pull postgres:17.4
 docker image ls
-
-echo
-echo "Создание volume для хранения данных"
 docker volume create postgres_data
-
-echo
-echo "Установка postgres версии 17"
-dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-dnf install -y postgresql17
 
 echo
 echo "Запуск контейнера"
@@ -43,7 +46,7 @@ docker run --name postgres_container \
 sleep 3
 
 echo
-echo "Настройка сервера для внешних подключений"
+echo "Запуск и настройка firewalld для приёма внешних соединений"
 systemctl start firewalld
 systemctl status firewalld
 firewall-cmd --permanent --add-port=5432/tcp
