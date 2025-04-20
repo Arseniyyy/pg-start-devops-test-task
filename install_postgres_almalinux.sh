@@ -1,9 +1,10 @@
 #!/bin/bash
-
-PGPASSWORD=9879
+PGPASSWORD=$(cat /tmp/pgpassword)
+echo "PG password: $PGPASSWORD"
 
 echo
 echo "Обновление и установка пакетов"
+dnf remove -y firewalld
 dnf --refresh -y update
 dnf install -y yum-utils firewalld
 yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -43,16 +44,21 @@ docker run --name postgres_container \
 sleep 3
 
 echo
+echo "Настройка пользователя student"
+docker exec postgres_container psql -U postgres -c "
+    CREATE USER student WITH PASSWORD '$PGPASSWORD';
+    ALTER USER student CREATEDB;
+    GRANT CONNECT ON DATABASE postgres TO student;
+    GRANT CREATE ON SCHEMA public TO student;
+    GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO student;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO student;"
+
+echo
 echo "Настройка сервера для внешних подключений"
 systemctl start firewalld
 systemctl status firewalld
 firewall-cmd --permanent --add-port=5432/tcp
 firewall-cmd --reload
-
-echo
-echo "Настройка базы данных для внешних подключений"
-docker exec postgres_container bash -c 'echo "host all all 0.0.0.0/0 scram-sha-256" >> /var/lib/postgresql/data/pg_hba.conf'
-docker restart postgres_container
 
 echo
 echo "Проверка работы PostgreSQL"

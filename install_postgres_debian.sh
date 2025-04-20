@@ -1,7 +1,6 @@
 #!/bin/bash
-
-PGPASSWORD=9879
-export PGPASSWORD=$PGPASSWORD
+PGPASSWORD=$(cat /tmp/pgpassword)
+echo "PG password: $PGPASSWORD"
 
 echo
 echo "Обновление и установка пакетов"
@@ -20,6 +19,9 @@ echo \
   tee /etc/apt/sources.list.d/docker.list > /dev/null
 apt-get -y update
 apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+echo
+echo "Установка psql"
 apt-get -y install postgresql
 
 echo
@@ -46,16 +48,22 @@ docker run --name postgres_container \
 sleep 3
 
 echo
+echo "Настройка пользователя student"
+docker exec postgres_container psql -U postgres -c "
+    CREATE USER student WITH PASSWORD '$PGPASSWORD';
+    ALTER USER student CREATEDB;
+    GRANT CONNECT ON DATABASE postgres TO student;
+    GRANT CREATE ON SCHEMA public TO student;
+    GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO student;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO student;
+"
+
+echo
 echo "Запуск и настройка firewalld для приёма внешних соединений"
 systemctl start firewalld
 systemctl status firewalld
 firewall-cmd --permanent --add-port=5432/tcp
 firewall-cmd --reload
-
-echo
-echo "Настройка базы данных для внешних подключений"
-docker exec postgres_container bash -c 'echo "host all all 0.0.0.0/0 scram-sha-256" >> /var/lib/postgresql/data/pg_hba.conf'
-docker restart postgres_container
 
 echo
 echo "Проверка работы PostgreSQL"
