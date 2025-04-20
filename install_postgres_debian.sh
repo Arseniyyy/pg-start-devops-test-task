@@ -32,6 +32,9 @@ echo
 echo "Подтягиваем образ postgres"
 docker pull postgres:17.4
 docker image ls
+
+echo
+echo "Создание volume для хранения данных"
 docker volume create postgres_data
 
 echo
@@ -55,8 +58,7 @@ docker exec postgres_container psql -U postgres -c "
     GRANT CONNECT ON DATABASE postgres TO student;
     GRANT CREATE ON SCHEMA public TO student;
     GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO student;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO student;
-"
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO student;"
 
 echo
 echo "Запуск и настройка firewalld для приёма внешних соединений"
