@@ -1,15 +1,34 @@
 #!/bin/bash
+
+echo_stamp() {
+  # TEMPLATE: echo_stamp <TEXT> <TYPE>
+  # TYPE: SUCCESS, ERROR, INFO
+
+  TEXT="$(date '+[%Y-%m-%d %H:%M:%S]') $1"
+  TEXT="\e[1m$TEXT\e[0m" # BOLD
+
+  case "$2" in
+    SUCCESS)
+    TEXT="\e[32m${TEXT}\e[0m";; # GREEN
+    ERROR)
+    TEXT="\e[31m${TEXT}\e[0m";; # RED
+    *)
+    TEXT="\e[34m${TEXT}\e[0m";; # BLUE
+  esac
+  echo -e ${TEXT}
+}
+
 PGPASSWORD=$(cat /tmp/pgpassword)
-echo "PG password: $PGPASSWORD"
+echo_stamp "PGPASSWORD: $PGPASSWORD"
 
 echo
-echo "Обновление и установка пакетов"
+echo_stamp "Обновление и установка пакетов"
 apt-get -y remove firewalld
 apt-get -y update
 apt-get -y install ca-certificates curl firewalld
 
 echo
-echo "Установка Docker"
+echo_stamp "Установка Docker"
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -21,24 +40,24 @@ apt-get -y update
 apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 echo
-echo "Установка psql"
+echo_stamp "Установка psql"
 apt-get -y install postgresql
 
 echo
-echo "Проверка запущен ли Docker"
+echo_stamp "Проверка запущен ли Docker"
 systemctl status docker
 
 echo
-echo "Подтягиваем образ postgres"
+echo_stamp "Подтягиваем образ postgres"
 docker pull postgres:17.4
 docker image ls
 
 echo
-echo "Создание volume для хранения данных"
+echo_stamp "Создание volume для хранения данных"
 docker volume create postgres_data
 
 echo
-echo "Запуск контейнера"
+echo_stamp "Запуск контейнера"
 docker run --name postgres_container \
   -e POSTGRES_PASSWORD=$PGPASSWORD \
   -e POSTGRES_USER=postgres \
@@ -51,7 +70,7 @@ docker run --name postgres_container \
 sleep 3
 
 echo
-echo "Настройка пользователя student"
+echo_stamp "Настройка пользователя student"
 docker exec postgres_container psql -U postgres -c "
     CREATE USER student WITH PASSWORD '$PGPASSWORD';
     ALTER USER student CREATEDB;
@@ -61,12 +80,12 @@ docker exec postgres_container psql -U postgres -c "
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO student;"
 
 echo
-echo "Запуск и настройка firewalld для приёма внешних соединений"
+echo_stamp "Запуск и настройка firewalld для приёма внешних соединений"
 systemctl start firewalld
 systemctl status firewalld
 firewall-cmd --permanent --add-port=5432/tcp
 firewall-cmd --reload
 
 echo
-echo "Проверка работы PostgreSQL"
+echo_stamp "Проверка работы PostgreSQL"
 docker exec postgres_container psql -d postgres -U postgres -c 'select 1'

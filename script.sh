@@ -1,15 +1,31 @@
 #!/bin/bash
-SSH_PRIVATE_KEY="~/.ssh/id_rsa"
-USER="root"
-PGPASSWORD=$(cat ./pgpassword)
-ALMA_LINUX_DISTRO_NAME="AlmaLinux"
-DEBIAN_DISTRO_NAME="Debian"
+readonly SSH_PRIVATE_KEY="~/.ssh/id_rsa"
+readonly USER="root"
+readonly ALMA_LINUX_DISTRO_NAME="AlmaLinux"
+readonly DEBIAN_DISTRO_NAME="Debian"
 
-echo "Пароль postgres: $PGPASSWORD"
-export PGPASSWORD=$PGPASSWORD
+echo_stamp() {
+  # TEMPLATE: echo_stamp <TEXT> <TYPE>
+  # TYPE: SUCCESS, ERROR, INFO
+
+  TEXT="$(date '+[%Y-%m-%d %H:%M:%S]') $1"
+  TEXT="\e[1m$TEXT\e[0m" # BOLD
+
+  case "$2" in
+    SUCCESS)
+    TEXT="\e[32m${TEXT}\e[0m";; # GREEN
+    ERROR)
+    TEXT="\e[31m${TEXT}\e[0m";; # RED
+    *)
+    TEXT="\e[34m${TEXT}\e[0m";; # BLUE
+  esac
+  echo -e ${TEXT}
+}
+
+export PGPASSWORD=$(cat ./pgpassword)
 
 if [ -z "$1" ]; then
-    echo "Сервера не указаны"
+    echo_stamp "Сервера не указаны" "ERROR"
     exit 1
 fi
 
@@ -56,7 +72,7 @@ install_to_almalinux() {
     local server_ip=$1
     local distro_name=$2
 
-    echo "Операционная система: $distro_name"
+    echo_stamp "Операционная система: $distro_name"
     scp -i "$SSH_PRIVATE_KEY" install_postgres_almalinux.sh pgpassword "$USER@$server_ip":/tmp/
     ssh -i "$SSH_PRIVATE_KEY" "$USER@$server_ip" \
         "chmod +x /tmp/install_postgres_almalinux.sh &&" \
@@ -67,7 +83,7 @@ install_to_debian() {
     local server_ip=$1
     local distro_name=$2
 
-    echo "Операционная система: $distro_name"
+    echo_stamp "Операционная система: $distro_name"
     scp -i "$SSH_PRIVATE_KEY" install_postgres_debian.sh pgpassword "$USER@$server_ip":/tmp/
     ssh -i "$SSH_PRIVATE_KEY" "$USER@$server_ip" \
         "chmod +x /tmp/install_postgres_debian.sh &&" \
@@ -88,7 +104,7 @@ configure_connection_to_user_student() {
 
 install_psql_almalinux() {
     local server_ip=$1
-    echo "Установка psql на AlmaLinux: '$server_ip'"
+    echo_stamp "Установка psql на AlmaLinux: $server_ip"
     ssh -i "$SSH_PRIVATE_KEY" "$USER@$server_ip" \
         "dnf --refresh -y update &&" \
         "dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm &&" \
@@ -97,10 +113,18 @@ install_psql_almalinux() {
 
 install_psql_debian() {
     local server_ip=$1
-    echo "Установка psql на Debian: '$server_ip'"
+    echo_stamp "Установка psql на Debian: '$server_ip'"
     ssh -i "$SSH_PRIVATE_KEY" "$USER@$server_ip" \
         "apt-get -y update &&" \
         "apt-get -y install postgresql"
+}
+
+connect_to_postgres_only_from_secondary_ip() {
+    local primary_ip=$1
+    local secondary_ip=$2
+    ssh -i "$SSH_PRIVATE_KEY" "$USER@$secondary_ip" \
+        "export PGPASSWORD='$PGPASSWORD' &&" \
+        "psql -U student -h '$primary_ip' -p 5432 -d postgres -c '\conninfo'"
 }
 
 IFS="," read -ra servers <<< "$1"
@@ -108,7 +132,7 @@ IFS="," read -ra servers <<< "$1"
 declare -A server_loads
 for server_ip in "${servers[@]}"; do
     if ! [[ $server_ip =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.|$)){4}$ ]]; then
-        echo "Ошибка: $server — неверный IP-адрес"
+        echo_stamp "$server — неверный IP-адрес" "ERROR"
         exit 1
     fi
     if [ $(check_distro_name "$server_ip") == "$ALMA_LINUX_DISTRO_NAME" ]; then
@@ -116,7 +140,7 @@ for server_ip in "${servers[@]}"; do
     elif [ $(check_distro_name "$server_ip") == "$DEBIAN_DISTRO_NAME" ]; then
         install_psql_debian "$server_ip"
     else
-        echo "Дистрибутив не AlmaLinux или Debian"
+        echo_stamp "Дистрибутив не AlmaLinux или Debian" "ERROR"
         exit 1
     fi
     normalized_load="$(check_load "$server_ip")"
@@ -136,7 +160,7 @@ less_loaded_server_line=$(
 )
 
 for server_ip in "${!server_loads[@]}"; do
-    echo "$server_ip: ${server_loads[$server_ip]}"
+    echo_stamp "$server_ip: ${server_loads[$server_ip]}"
 done
 
 if [ -n "$less_loaded_server_line" ]; then
@@ -152,40 +176,39 @@ if [ -n "$less_loaded_server_line" ]; then
         fi
     done
     if [ "$secondary_ip_found" = false ]; then
-        echo "secondary_ip не найден"
+        echo_stamp "secondary_ip не найден" "ERROR"
         exit 1
     fi
 
-    echo "Менее загруженный сервер: $primary_ip"
-    echo "Более загруженный сервер: $secondary_ip"
+    echo_stamp "Менее загруженный сервер: $primary_ip"
+    echo_stamp "Более загруженный сервер: $secondary_ip"
+    message="Подключение к базе данных под пользователем student только со вторичного сервера $secondary_ip"
 
     if [[ "$distro_name" == "$ALMA_LINUX_DISTRO_NAME" ]]; then
         install_to_almalinux "$primary_ip" "$distro_name"
         configure_connection_to_user_student "$primary_ip" "$secondary_ip"
-        echo "Подключение к базе данных под пользователем student только с сервера $secondary_ip"
-        ssh -i "$SSH_PRIVATE_KEY" "$USER@$secondary_ip" \
-            "export PGPASSWORD='$PGPASSWORD' &&" \
-            "psql -U student -h '$primary_ip' -p 5432 -d postgres -c '\conninfo'"
+        echo_stamp "$message"
+        connect_to_postgres_only_from_secondary_ip "$primary_ip" "$secondary_ip"
     elif [[ "$distro_name" == "$DEBIAN_DISTRO_NAME" ]]; then
         install_to_debian "$primary_ip" "$distro_name"
         configure_connection_to_user_student "$primary_ip" "$secondary_ip"
-        echo "Подключение к базе данных под пользователем student только с сервера $secondary_ip"
-        ssh -i "$SSH_PRIVATE_KEY" "$USER@$secondary_ip" \
-            "export PGPASSWORD='$PGPASSWORD' &&" \
-            "psql -U student -h '$primary_ip' -p 5432 -d postgres -c '\conninfo'"
+        echo_stamp "$message"
+        connect_to_postgres_only_from_secondary_ip "$primary_ip" "$secondary_ip"
     else
-        echo "Имя дистрибутива не подходит"
+        echo_stamp "Имя дистрибутива не подходит" "ERROR"
         exit 1
     fi
 else
-    echo "Не найдено ни одного сервера с валидной оценкой."
+    echo_stamp "Не найдено ни одного сервера с валидной оценкой" "ERROR"
     exit 1
 fi
 
 echo
-echo "Проверка подключения к базе данных с локального хоста"
+echo_stamp "Проверка подключения к базе данных ($primary_ip) с локального хоста"
+psql -U postgres -d postgres -h "$primary_ip" -p 5432 -c "SELECT 1"
+psql -U postgres -d postgres -h "$primary_ip" -p 5432 -c "\du"
 psql -U postgres -d postgres -h "$primary_ip" -p 5432 -c "\conninfo"
 
 echo
-echo "Проверим, подключается ли пользователь student с другого хоста (команда должна вывести ошибку)"
-psql -U student -d postgres -h "$primary_ip" -p 5432 -c '\conninfo'
+echo_stamp "Проверим, подключается ли пользователь к базе данных ($primary_ip) student с другого хоста (команда должна вывести ошибку)"
+psql -U student -d postgres -h "$primary_ip" -p 5432 -c 'SELECT 1'
